@@ -183,6 +183,16 @@ interface NextTracer {
    * This allows child spans created within the function to automatically parent to this span.
    */
   withSpan<T>(span: Span, fn: () => T): T
+
+  /**
+   * Injects the currently active trace context (e.g. `traceparent`/`tracestate`)
+   * into the given headers-like carrier. This allows a later, unrelated call
+   * to `withPropagatedContext` with the same carrier (e.g. a second
+   * `BaseServer.handleRequest` invocation for the same underlying request,
+   * such as middleware followed by page rendering) to continue the current
+   * trace instead of starting a disconnected one.
+   */
+  injectTraceContext<C>(carrier: C): void
 }
 
 type NextAttributeNames =
@@ -258,6 +268,10 @@ class NextTracerImpl implements NextTracer {
     const entries: ClientTraceDataEntry[] = []
     propagation.inject(activeContext, entries, clientTraceDataSetter)
     return entries
+  }
+
+  public injectTraceContext<C>(carrier: C): void {
+    propagation.inject(context.active(), carrier)
   }
 
   public getActiveScopeSpan(): Span | undefined {

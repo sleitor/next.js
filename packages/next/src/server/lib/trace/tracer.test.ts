@@ -164,6 +164,98 @@ describe('withPropagatedContext', () => {
   })
 })
 
+class RoundTripPropagator implements TextMapPropagator {
+  fields(): string[] {
+    return ['x-test-traceparent']
+  }
+
+  inject(
+    activeContext: Context,
+    carrier: Record<string, string | undefined>
+  ): void {
+    const spanContext = trace.getSpanContext(activeContext)
+    if (!spanContext) return
+    carrier['x-test-traceparent'] =
+      `${spanContext.traceId}:${spanContext.spanId}`
+  }
+
+  extract(
+    extractedContext: Context,
+    carrier: Record<string, string | undefined>,
+    mapGetter: TextMapGetter<Record<string, string | undefined>>
+  ): Context {
+    const value = mapGetter.get(carrier, 'x-test-traceparent')
+    if (!value || Array.isArray(value)) {
+      return extractedContext
+    }
+    const [traceId, spanId] = value.split(':')
+    return trace.setSpanContext(extractedContext, {
+      traceId,
+      spanId,
+      traceFlags: 1,
+      isRemote: true,
+    })
+  }
+}
+
+describe('injectTraceContext', () => {
+  let getTracerProviderSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    context.disable()
+    propagation.disable()
+    context.setGlobalContextManager(new TestContextManager())
+    propagation.setGlobalPropagator(new RoundTripPropagator())
+    // `withPropagatedContext` skips extraction entirely when it thinks OTel
+    // isn't enabled and there's no active span. Simulate a configured
+    // TracerProvider (as would exist in production once OTel is set up) so
+    // the carrier extraction path we're testing actually runs.
+    getTracerProviderSpy = jest
+      .spyOn(trace, 'getTracerProvider')
+      .mockReturnValue({} as ReturnType<typeof trace.getTracerProvider>)
+  })
+
+  afterEach(() => {
+    getTracerProviderSpy.mockRestore()
+    propagation.disable()
+    context.disable()
+  })
+
+  it('round-trips the active span context through a headers-like carrier', () => {
+    const activeSpan = trace.wrapSpanContext({
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: 1,
+      isRemote: false,
+    })
+    const activeContext = trace.setSpan(ROOT_CONTEXT, activeSpan)
+    const carrier: Record<string, string | undefined> = {}
+
+    context.with(activeContext, () => {
+      getTracer().injectTraceContext(carrier)
+    })
+
+    expect(carrier['x-test-traceparent']).toBe(
+      '0123456789abcdef0123456789abcdef:0123456789abcdef'
+    )
+
+    // A later, unrelated call (no active span) should extract the injected
+    // context from the carrier instead of starting a disconnected trace.
+    const result = getTracer().withPropagatedContext(
+      carrier,
+      () => trace.getSpanContext(context.active()),
+      getter
+    )
+
+    expect(result).toEqual({
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: 1,
+      isRemote: true,
+    })
+  })
+})
+
 describe('local span recording', () => {
   beforeEach(() => {
     process.env.__NEXT_DEV_SERVER = '1'

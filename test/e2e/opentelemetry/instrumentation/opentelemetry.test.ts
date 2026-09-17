@@ -1935,11 +1935,31 @@ describe.each(
         () => {
           it('should trace middleware', async () => {
             await next.fetch('/behind-middleware', env.fetchInit)
+            // Both the middleware execution span and the page-render
+            // `BaseServer.handleRequest` span now share a common parent
+            // (the `BaseServer.handleRequest` span created for the
+            // middleware invocation, whose trace context is injected back
+            // into the request headers). This unifies what used to be two
+            // disconnected traces into a single one.
+            // See: https://github.com/vercel/next.js/issues/91282
+            //
+            // The direct-entrypoint-handler + "root context" combination is
+            // an exception: that entrypoint doesn't route the middleware and
+            // page-render invocations through the same mutable request
+            // object, so there's no header carrier available to propagate
+            // the injected trace context through when no incoming trace
+            // context already exists.
+            const isUnifiedByFix = !(
+              useDirectEntrypointHandler && env.name === 'root context'
+            )
+            const expectedParentId = isUnifiedByFix
+              ? expect.any(String)
+              : env.span.rootParentId
             let expected = [
               {
                 runtime: runtime,
                 traceId: env.span.traceId,
-                parentId: env.span.rootParentId,
+                parentId: expectedParentId,
                 name: 'middleware GET',
                 attributes: {
                   'http.method': 'GET',
@@ -1953,7 +1973,7 @@ describe.each(
               {
                 runtime: 'nodejs',
                 traceId: env.span.traceId,
-                parentId: env.span.rootParentId,
+                parentId: expectedParentId,
                 name: 'GET /behind-middleware',
                 attributes: {
                   'http.method': 'GET',
@@ -1970,7 +1990,15 @@ describe.each(
               // TODO unclear why this is reversed for Node.js runtime
               expected.reverse()
             }
-            await expectTrace(getCollector(), expected)
+            const filteredTree = await expectTrace(getCollector(), expected)
+
+            // Verify the two spans are unified under a single common parent
+            // rather than each being an independent root (the original bug).
+            const [first, second] = filteredTree
+            if (isUnifiedByFix) {
+              expect(first.parentId).toBeTruthy()
+            }
+            expect(first.parentId).toBe(second.parentId)
           })
         }
       )
@@ -2516,7 +2544,7 @@ async function expectTrace(
       .filter(Boolean)
   )
 
-  await retry(async () => {
+  return await retry(async () => {
     const traces = collector
       .getSpans()
       .filter(
@@ -2603,5 +2631,6 @@ async function expectTrace(
     })
 
     expect(filteredTree).toMatchObject(match)
+    return filteredTree
   })
 }
