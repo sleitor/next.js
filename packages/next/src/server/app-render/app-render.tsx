@@ -110,6 +110,7 @@ import {
   getRedirectStatusCodeFromError,
 } from '../../client/components/redirect'
 import { isRedirectError } from '../../client/components/redirect-error'
+import { isNextRouterError } from '../../client/components/is-next-router-error'
 import { getImplicitTags, type ImplicitTags } from '../lib/implicit-tags'
 import { AppRenderSpan, NextNodeServerSpan } from '../lib/trace/constants'
 import {
@@ -7668,7 +7669,9 @@ async function validateInstantConfigs(
             {
               signal: reactSignal,
               onBrowserBailout: (err: unknown, errorInfo: ErrorInfo) => {
-                if (!reactSignal.aborted) {
+                if (isNextRouterError(err)) {
+                  instantValidationState.hasNextRouterError = true
+                } else if (!reactSignal.aborted) {
                   const componentStack = errorInfo.componentStack
                   if (typeof componentStack === 'string') {
                     trackThrownErrorInNavigation(
@@ -7696,6 +7699,8 @@ async function validateInstantConfigs(
                     )
                   }
                   return
+                } else if (isNextRouterError(err)) {
+                  instantValidationState.hasNextRouterError = true
                 } else if (!reactSignal.aborted) {
                   const componentStack = errorInfo.componentStack
                   if (typeof componentStack === 'string') {

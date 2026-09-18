@@ -192,6 +192,23 @@ describe('instant validation - server errors', () => {
     })
   })
 
+  it('deliberate redirect() from a layout inside Suspense does not block validation', async () => {
+    const pathname =
+      '/suspense-in-root/static/valid-redirect-in-suspense-does-not-block-validation'
+    if (isNextDev) {
+      const browser = await next.browser(pathname)
+      await waitForValidation(await browser.url(), getCliOutputSinceMark)
+      // A deliberate redirect() is control flow, not a rendering error.
+      // It must not be reported as an instant-validation failure.
+      expect(getCliOutputSinceMark()).not.toContain(
+        'Could not validate `instant`'
+      )
+    } else {
+      const result = await prerender(pathname)
+      expect(result.cliOutput).not.toContain('Could not validate `instant`')
+    }
+  })
+
   async function navigateViaClientNav(href: string): Promise<Playwright> {
     const browser = await next.browser('/suspense-in-root')
     await browser

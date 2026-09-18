@@ -716,6 +716,13 @@ export type InstantValidationState = {
   /** Per-slot config factories. Index 0 is the root config (fallback).
    * Indices 1+ correspond to slot marker components in the tree. */
   slotStacks: Array<(() => Error) | null>
+  /** Set when a router sentinel (redirect()/notFound()/forbidden()/
+   * unauthorized()) was thrown during this render. A deliberate
+   * navigation signal is control flow, not a rendering error, so it
+   * should never be reported as an instant-validation failure, even
+   * if it prevented other segments (and their validation boundaries)
+   * from rendering. */
+  hasNextRouterError: boolean
 }
 
 export function createInstantValidationState(
@@ -731,6 +738,7 @@ export function createInstantValidationState(
     validationPreventingErrors: [],
     thrownErrorsOutsideBoundary: [],
     slotStacks,
+    hasNextRouterError: false,
   }
 }
 
@@ -1309,6 +1317,15 @@ export function getNavigationDisallowedDynamicReasons(
   boundaryState: ValidationBoundaryTracking,
   devRenderDidError: boolean
 ): NavigationValidationResult {
+  // A deliberate redirect()/notFound()/forbidden()/unauthorized() call is
+  // control flow, not a rendering error. It may have prevented other
+  // segments (and their validation boundaries) from rendering, but that's
+  // expected: the route is navigating away, so there's nothing to
+  // validate here. Stay silent instead of reporting a validation failure.
+  if (dynamicValidation.hasNextRouterError) {
+    return []
+  }
+
   // If we have errors related to missing samples, those should take precedence over everything else.
   if (validationSampleTracking) {
     const { missingSampleErrors } = validationSampleTracking
