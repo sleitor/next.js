@@ -172,6 +172,27 @@ describe('config', () => {
     }).rejects.toThrow(/The "target" property is no longer supported/)
   })
 
+  it('Should throw when distDir resolves outside of the project directory', async () => {
+    await expect(async () => {
+      await loadConfig(
+        PHASE_DEVELOPMENT_SERVER,
+        join(__dirname, '_resolvedata', 'distdir-outside-project')
+      )
+    }).rejects.toThrow(
+      /distDir .* resolves to .*, which is outside of your project directory/
+    )
+  })
+
+  it('Should allow a distDir nested inside of the project directory', async () => {
+    const config = await loadConfig(
+      PHASE_DEVELOPMENT_SERVER,
+      join(__dirname, '_resolvedata', 'distdir-valid-nested')
+    )
+    expect(config.distDir.replace(/\\/g, '/')).toEqual(
+      'nested/build-output/dev'
+    )
+  })
+
   it('Should throw an error when next.config.(js | mjs | ts) is not present', async () => {
     await expect(
       async () =>

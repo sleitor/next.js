@@ -397,6 +397,19 @@ function assignDefaultsAndValidate(
             `Invalid distDir provided, distDir can not be an empty string. Please remove this config or set it to undefined`
           )
         }
+
+        // `next build` (and `next dev`) recursively delete the contents of
+        // distDir before writing new output. If distDir resolves to a path
+        // outside of the project directory, this can permanently delete
+        // unrelated user data (e.g. `distDir: '../../'` in a monorepo).
+        // Reject configs like this instead of silently deleting files.
+        const resolvedDistDir = resolve(dir, userDistDir)
+        const relativeToDir = relative(dir, resolvedDistDir)
+        if (relativeToDir.startsWith('..') || isAbsolute(relativeToDir)) {
+          throw new Error(
+            `Specified distDir "${userDistDir}" resolves to "${resolvedDistDir}", which is outside of your project directory ("${dir}"). Next.js needs to safely clean the contents of distDir when building, so distDir must be located inside your project directory. Please update the "distDir" option in your ${configFileName}.`
+          )
+        }
       }
 
       if (key === 'pageExtensions') {
